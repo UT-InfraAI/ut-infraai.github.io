@@ -115,6 +115,11 @@ figcaption { margin-top: 12px; color: var(--muted); font: 13px/1.5 var(--sans); 
 .post-end { max-width: 730px; margin: 50px auto 0; padding-top: 24px; border-top: 1px solid var(--rule); font-size: 14px; }
 .post-end a { text-decoration: none; }
 .footnotes { margin-top: 40px; font-size: 15px; color: var(--muted); }
+.footnotes::before { content: "References"; display: block; margin-bottom: 12px; color: var(--ink); font-size: 13px; font-weight: 650; letter-spacing: .13em; text-transform: uppercase; }
+.prose sup[role="doc-noteref"] { font-size: .7em; line-height: 0; }
+.prose a.footnote { text-decoration: none; }
+.prose a.footnote::before { content: "["; }
+.prose a.footnote::after { content: "]"; }
 .highlight .c, .highlight .c1, .highlight .cm { color: #666c65; font-style: italic; }
 .highlight .k, .highlight .kd, .highlight .kt { color: #855033; font-weight: 600; }
 .highlight .s, .highlight .s1, .highlight .s2 { color: #396342; }
