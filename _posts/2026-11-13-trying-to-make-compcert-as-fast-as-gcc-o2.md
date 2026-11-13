@@ -277,7 +277,7 @@ Simply using a temporary register to accumulate the sum across loop iterations c
         movsd   %xmm1, 0(%rdx,%r9,8)    # store Au[i] once after the loop finishes
 ```
 
-Our `Loadfwd` pass keeps `Au[i]` available in a register across loop iterations, removing the reload while retaining the store.
+This transformation could be realized with two standard loop optimizations that GCC and LLVM already perform but CompCert lacks: *loop-invariant code motion* (LICM) and *loop rotation*. Together, they load `Au[i]` once before the loop and store it once after it.
 
 ### Over-Conservative Stack Aliasing in `sha3`
 
@@ -815,6 +815,6 @@ highlightAsm();
 [^csmith]: Xuejun Yang, Yang Chen, Eric Eide, and John Regehr. [Finding and Understanding Bugs in C Compilers](https://doi.org/10.1145/1993498.1993532). PLDI 2011.
 [^emi]: Vu Le, Mehrdad Afshari, and Zhendong Su. [Compiler Validation via Equivalence Modulo Inputs](https://doi.org/10.1145/2594291.2594334). PLDI 2014.
 [^sun]: Chengnian Sun, Vu Le, Qirun Zhang, and Zhendong Su. [Toward Understanding Compiler Bugs in GCC and LLVM](https://doi.org/10.1145/2931037.2931074). ISSTA 2016.
-[^bench]: CompCert benchmarks: the programs in CompCert 3.18's `test/c` directory ([CompCert-small-tests](https://github.com/AbsInt/CompCert-small-tests)). PolyBench: the 30 loop-nest kernels of [PolyBench/C 4.2.1](https://sourceforge.net/projects/polybench/). All measurements in this post were taken on an Intel Xeon 4314; the benchmarking harness is in [`faster-compcert/`](https://github.com/UT-InfraAI/CompCert/tree/v3.18/faster-compcert) in our fork. We used GCC 11.4, with the `-O1`, `-O2`, and `-O3` flags shown; restricted `-O2` adds the four flags in Section 1. No explicit `-march`, `-mtune`, or FMA-enabling flag was used. Final timings are single-session minima from 2026-10-25, pinned to one core, with rotating interleaved configurations and at least seven runs and 1.5 seconds per configuration. PolyBench dataset sizes are listed in [`suites.py`](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/harness/suites.py). The shared machine showed up to 40% variation on some memory-bound kernels, so small differences should not be treated as established wins.
+[^bench]: CompCert benchmarks: the programs in CompCert 3.18's `test/c` directory ([CompCert-small-tests](https://github.com/AbsInt/CompCert-small-tests)). PolyBench: the 30 loop-nest kernels of [PolyBench/C 4.2.1](https://sourceforge.net/projects/polybench/). All measurements in this post were taken on an Intel Xeon 4314; the benchmarking harness is in [`faster-compcert/`](https://github.com/UT-InfraAI/CompCert/tree/v3.18/faster-compcert) in our fork.
 
 [^scope]: The theorem covers the verified pipeline from CompCert C abstract syntax to assembly abstract syntax. Front-end elaboration, assembly printing, assembling, and linking remain trusted. See the [CompCert manual](https://compcert.org/man/manual001.html).
