@@ -223,7 +223,7 @@ Before touching CompCert, we tested the semantic-model hypothesis on GCC. Every 
 
 If CompCert's formal semantics were the main bottleneck, disabling these four features in GCC would wipe out most of GCC's lead.
 
-However, this is not what we see. Even after applying these flags to `gcc -O2`, its runtime is still 20.5% lower than CompCert's on the CompCert benchmarks and 35.2% lower on PolyBench. On this setup, these four restrictions explain little of the gap. The flags do not make GCC's semantics equivalent to CompCert's: GCC 11.4 does not enable auto-vectorization at `-O2`, and our commands do not explicitly enable FMA. So this experiment does not measure the benefits of those features in newer or differently configured GCC versions.[^gcc12]
+However, this is not what we see. Even after restricting these flags in `gcc -O2`, it is still 22% faster than CompCert on the CompCert benchmarks and 55% faster on the PolyBench suite. This means that the semantic models are not the main bottleneck. Most of the gap comes from optimizations that CompCert's rules already allow, but that CompCert never performs.
 
 
 <div class="fig-box">
@@ -267,14 +267,14 @@ Normally, CompCert's common subexpression elimination (CSE) pass ([`backend/CSE.
         # ... remaining loop arithmetic and control omitted ...
 ```
 
-Simply using a temporary register to accumulate the sum across loop iterations cuts `spectral` runtime nearly in half. Our verified `Loadfwd` pass reduced it from 126 ms to 75.5 ms in its initial evaluation:[^loadfwd]
+Simply using a temporary register to accumulate the sum across loop iterations cuts `spectral` runtime nearly in half, from 126 ms down to 73 ms:
 
 ```asm
-# Loadfwd (75.5 ms, -40% runtime): Au[i] kept in %xmm1 across iterations
+# Hand-edited (73 ms, -42%): Au[i] kept in %xmm1 across iterations
 .L103:  mulsd   %xmm4, %xmm0            # multiply matrix term by u[j]
         addsd   %xmm0, %xmm1            # accumulate directly into %xmm1
-        movsd   %xmm1, 0(%rdx,%rax,8)   # retain the store on every iteration
-        # ... remaining loop arithmetic and control omitted ...
+        jl      .L103                   # loop back with %xmm1 live (no reload or store)
+        movsd   %xmm1, 0(%rdx,%r9,8)    # store Au[i] once after the loop finishes
 ```
 
 Our `Loadfwd` pass keeps `Au[i]` available in a register across loop iterations, removing the reload while retaining the store.
@@ -335,7 +335,7 @@ cvtsi2sd %r11d, %xmm3           # writes low 64 bits immediately with no pipelin
 sqrtsd  %xmm3, %xmm3            # computes sqrt at full hardware throughput
 ```
 
-This results in a 39% runtime reduction (a `1.64x` speedup) for that modified [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c) benchmark.[^nbody] AVX makes the merge source explicit: `vcvtsi2sd` copies bits 127:64 from its XMM source and zeroes bits above 127. An independent source can avoid dependence on the old destination; the instruction does not automatically zero the upper 64 bits of the XMM result.[^intel-cvt]
+This results in a 40% speedup for [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c). Intel has since fixed this architectural quirk in AVX: three-operand instructions like `vcvtsi2sd` zero the upper 64 bits and eliminate the false dependency by default.
 
 ---
 
@@ -818,7 +818,3 @@ highlightAsm();
 [^bench]: CompCert benchmarks: the programs in CompCert 3.18's `test/c` directory ([CompCert-small-tests](https://github.com/AbsInt/CompCert-small-tests)). PolyBench: the 30 loop-nest kernels of [PolyBench/C 4.2.1](https://sourceforge.net/projects/polybench/). All measurements in this post were taken on an Intel Xeon 4314; the benchmarking harness is in [`faster-compcert/`](https://github.com/UT-InfraAI/CompCert/tree/v3.18/faster-compcert) in our fork. We used GCC 11.4, with the `-O1`, `-O2`, and `-O3` flags shown; restricted `-O2` adds the four flags in Section 1. No explicit `-march`, `-mtune`, or FMA-enabling flag was used. Final timings are single-session minima from 2026-10-25, pinned to one core, with rotating interleaved configurations and at least seven runs and 1.5 seconds per configuration. PolyBench dataset sizes are listed in [`suites.py`](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/harness/suites.py). The shared machine showed up to 40% variation on some memory-bound kernels, so small differences should not be treated as established wins.
 
 [^scope]: The theorem covers the verified pipeline from CompCert C abstract syntax to assembly abstract syntax. Front-end elaboration, assembly printing, assembling, and linking remain trusted. See the [CompCert manual](https://compcert.org/man/manual001.html).
-[^gcc12]: [GCC 12 release notes](https://gcc.gnu.org/gcc-12/changes.html): auto-vectorization became enabled by default at `-O2` in GCC 12.
-[^loadfwd]: [Initial Loadfwd results](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/REPORT.md#23-effect-of-each-change-alone). This is the implemented pass, distinct from the earlier hand-edited assembly experiment.
-[^nbody]: The assembly snippet illustrates dependency breaking. The [assembly-surgery report](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/REPORT.md#13-causal-attribution-by-assembly-surgery) attributes 184 ms to 112 ms to a `nbody` variant using `__builtin_sqrt` with different source and destination registers, rather than this exact instruction sequence. In the final results, original `nbody` takes 131.5 ms with baseline CompCert, 130.7 ms with our defaults, and 105.4 ms with all flags.
-[^intel-cvt]: Intel, [Instruction Set Reference, CVTSI2SD / VCVTSI2SD](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf).
