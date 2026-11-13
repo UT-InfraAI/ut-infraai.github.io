@@ -192,7 +192,7 @@ math: true
 .asm-num     { color: #0086b3; }
 </style>
 
-CompCert ([GitHub](https://github.com/AbsInt/CompCert)) is a *formally verified* C compiler written in Rocq and OCaml. Like `gcc` or `clang`, it compiles C to assembly and optimizes the program to be faster along the way; the difference is that CompCert *proves* that those optimizations never change what the program does. You feed a C program into the front end, and it transforms the program through a sequence of optimizations and intermediate representations all the way down to x86-64 assembly code. Each of these transformations, also called passes in compiler jargon, is implemented in Rocq and proved to preserve the program's behavior under CompCert's *formal semantics* of C and x86-64: precise mathematical definitions of what a C program means and what each x86-64 instruction does. At the end, a machine-checked theorem ensures that the emitted assembly code has the same behavior as the source C program. This makes CompCert particularly suitable for safety-critical software where correctness is just as important as performance, since mainstream compilers such as GCC and LLVM have been shown to silently generate wrong code.[^csmith][^emi][^sun]
+CompCert ([GitHub](https://github.com/AbsInt/CompCert)) is a *formally verified* C compiler written in Rocq and OCaml. Like `gcc` or `clang`, it compiles C to assembly and optimizes the program to be faster along the way; the difference is that CompCert *proves* that those optimizations preserve the program's behavior under its formal semantics. You feed a C program into the front end, and it transforms the program through a sequence of optimizations and intermediate representations all the way down to x86-64 assembly code. Each of these transformations in the verified pipeline, also called passes in compiler jargon, is implemented in Rocq or checked by a verified validator, and proved to preserve the program's behavior under CompCert's *formal semantics* of C and x86-64: precise mathematical definitions of what a C program means and what each x86-64 instruction does. At the end, a machine-checked theorem ensures that the generated assembly preserves an allowed behavior of the source C program, provided the source has no undefined behavior under these semantics.[^scope] This makes CompCert particularly suitable for safety-critical software where correctness is just as important as performance, since mainstream compilers such as GCC and LLVM have been shown to silently generate wrong code.[^csmith][^emi][^sun]
 
 However, formal verification currently comes with a steep runtime tax. For example, the CompCert benchmarks, a suite of test programs that ships with CompCert, run roughly 28% slower than when compiled by `gcc -O2`, and the PolyBench loop-nest benchmarks run about 55% slower.[^bench]
 
@@ -206,7 +206,7 @@ I wanted to know whether these semantic restrictions actually explain why CompCe
 1. Is proof generation the bottleneck? (CompCert was first released in 2008...)
 2. Could AI agents find, implement, and *prove* those transformations in Rocq without any human intervention? (Recent progress in math suggests yes...)
 
-All of our passes, proofs, and benchmarking scripts are available at [github.com/UT-InfraAI/CompCert](https://github.com/UT-InfraAI/CompCert).
+All of our passes, proofs, and benchmarking scripts are available at [github.com/UT-InfraAI/CompCert](https://github.com/UT-InfraAI/CompCert/tree/v3.18).
 
 ---
 
@@ -214,7 +214,7 @@ All of our passes, proofs, and benchmarking scripts are available at [github.com
 
 Before touching CompCert, we tested the semantic-model hypothesis on GCC. Every major restriction in CompCert's semantics has a matching flag in GCC that disables the corresponding optimizations:
 
-| Restriction | In CompCert | Matching GCC flag |
+| Restriction | In CompCert | GCC flag |
 |---|---|---|
 | Signed integer overflow | Defined to wrap around | `-fwrapv` |
 | Type-based aliasing | Rules not in the memory model | `-fno-strict-aliasing` |
@@ -256,15 +256,15 @@ for (j = 0; j < n; j++)
   Au[i] += u[j] / (double)((i + j) * (i + j + 1) / 2 + i + 1);
 ```
 
-Normally, CompCert's common subexpression elimination (CSE) pass ([`backend/CSE.v`](https://github.com/UT-InfraAI/CompCert/blob/master/backend/CSE.v)) would avoid reloading a value the program already has. But CSE only remembers values within a stretch of code that has a single way in, and the top of a loop has two: from the code before the loop, and from the end of the previous iteration. So CSE forgets everything it knew at the start of every iteration. As a result, CompCert reloads `Au[i]` from memory, adds to it, and stores it back on every single inner-loop iteration:
+Normally, CompCert's common subexpression elimination (CSE) pass ([`backend/CSE.v`](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/CSE.v)) would avoid reloading a value the program already has. But CSE only remembers values within a stretch of code that has a single way in, and the top of a loop has two: from the code before the loop, and from the end of the previous iteration. So CSE forgets everything it knew at the start of every iteration. As a result, CompCert reloads `Au[i]` from memory, adds to it, and stores it back on every single inner-loop iteration:
 
 ```asm
-# CompCert (126 ms): reload and store on every iteration
+# CompCert (126 ms): reload and store on every iteration; excerpt
 .L102:  movsd   0(%rdx,%rax,8), %xmm1   # reload Au[i] from memory
         mulsd   %xmm4, %xmm0            # multiply matrix term by u[j]
         addsd   %xmm0, %xmm1            # add product to accumulator
         movsd   %xmm1, 0(%rdx,%rax,8)   # store Au[i] back to memory
-        jmp     .L102                   # repeat on next iteration
+        # ... remaining loop arithmetic and control omitted ...
 ```
 
 Simply using a temporary register to accumulate the sum across loop iterations cuts `spectral` runtime nearly in half, from 126 ms down to 73 ms:
@@ -292,7 +292,7 @@ for (i = 0; i < 5; i++)
 
 By the end of each round, 34 stores to `bc[]` are dead because those slots are overwritten before they are ever read again.
 
-CompCert's dead-code elimination pass ([`backend/Deadcode.v`](https://github.com/UT-InfraAI/CompCert/blob/master/backend/Deadcode.v)) should remove them, but it didn't. `keccakf` reads its state through a pointer `st` passed in by the caller. CompCert's analysis ([`backend/NeedDomain.v`](https://github.com/UT-InfraAI/CompCert/blob/master/backend/NeedDomain.v)) already knows that `st` cannot point into `keccakf`'s own stack frame, yet it treated every load through `st` as if it might read anything on that stack frame, including `bc`. So every store to `bc` looked like it might be needed later:
+CompCert's dead-code elimination pass ([`backend/Deadcode.v`](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/Deadcode.v)) should remove them, but it didn't. `keccakf` reads its state through a pointer `st` passed in by the caller. CompCert's analysis ([`backend/NeedDomain.v`](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/NeedDomain.v)) already knows that `st` cannot point into `keccakf`'s own stack frame, yet it treated every load through `st` as if it might read anything on that stack frame, including `bc`. So every store to `bc` looked like it might be needed later:
 
 ```asm
 # CompCert: stores to bc[] that are never read
@@ -318,7 +318,7 @@ movl    %edx, %edx              # redundant! 32-bit shift already zeroes upper 3
 movl    0(%r9,%rdx,4), %r10d    # load 32-bit word from lookup table Te0
 ```
 
-That added 34 useless instructions to every encryption round. Just removing these instructions cut `aes` runtime from ~84 ms down to ~76 ms (a 9% speedup). Along with LICM, we were able to reach ~67 ms (a 21% speedup). This was slightly faster than `gcc -O2`.
+That added 23 useless instructions to every encryption round in the assembly-surgery report. Just removing these instructions cut `aes` runtime from 85.2 ms down to 77.6 ms (a 9% runtime reduction). Along with LICM, we were able to reach ~67 ms (about a 20% runtime reduction from the ~84 ms baseline). This was slightly faster than `gcc -O2`.
 
 Second, we found a suboptimal lowering in CompCert's emission of scalar SSE instructions like `cvtsi2sd` and `sqrtsd`. While these instructions write only the lower 64 bits, the hardware considers the full 128 bits of the `%xmm` register when executing and must keep the upper bits intact. These upper bits are never used in scalar code (no SIMD). This creates a false read-after-write dependency where the CPU waits for the previous write to that register to complete, stalling the instruction pipeline.
 
@@ -369,11 +369,11 @@ CompCert already uses this design for passes with complex graph algorithms:
 * **Register Allocation (`Allocation.v`):** An untrusted OCaml solver runs iterated register coalescing graph coloring, and a compact Rocq validator checks that no interfering variables share a physical register.
 * **Basic Block Layout (`Linearize.v`):** An untrusted OCaml heuristic orders blocks to minimize jumps, and a verified Rocq validator checks that all control flow paths remain intact.
 
-This architecture does not weaken the mathematical guarantee. The compiler remains 100% verified. You prove a single theorem for the validator once when building the compiler:
+This architecture does not weaken the mathematical guarantee. The pass retains its verification guarantee under the same trusted assumptions. You prove a single theorem for the validator once when building the compiler:
 
-$$\forall f \, f', \quad \text{if } \texttt{check_function}(f, f') = \texttt{OK}, \quad \text{then } f \text{ and } f' \text{ have identical observable semantics.}$$
+$$\begin{gathered}\forall f \, f', \quad \texttt{check_function}(f, f') = \texttt{OK}\\ \implies f' \text{ preserves the semantics of } f.\end{gathered}$$
 
-When you compile a C program, CompCert runs the validator to guarantee that the transformation is correct for that specific program. Since the validator is mathematically proven never to return `OK` on an invalid rewrite, an untrusted oracle cannot compromise correctness. If the oracle is buggy and suggests a broken transformation, the validator is guaranteed to reject it, and the compiler falls back to the original code. Most of the passes we implemented in this project used this architecture.
+When you compile a C program, CompCert runs the validator to guarantee that the transformation is correct for that specific program. Since the validator is mathematically proven never to return `OK` on an invalid rewrite, an untrusted oracle cannot compromise correctness. If the oracle is buggy and suggests a broken transformation, the validator is guaranteed to reject it, and the compiler either falls back to the original code or reports a compilation error. Most of the passes we implemented in this project used this architecture.
 
 ---
 
@@ -385,15 +385,15 @@ While Rocq verifies that the transformations themselves are mathematically sound
 
 We implemented 5 new passes as well as improvements to existing passes:
 
-| Pass & Intermediate Layer | Transformation | Key Speedup |
+| Pass & Intermediate Layer | Transformation | Runtime change |
 |---|---|---|
-| **IVwiden** (RTL, new) | Widens 32-bit IVs to 64 bits; folds affine array offsets | [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) -26%, [`sha1`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/sha1.c) -13% |
-| **LICM + Looprot** (RTL, new) | Hoists invariant chains (row strides and base addresses) | [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) -28%, [`syrk`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/syrk/syrk.c) -27% |
-| **Loadfwd** (RTL, new) | Forwards loads across join points and loop back-edges | [`spectral`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/spectral.c) -40%, [`3mm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/kernels/3mm/3mm.c) -47% |
-| **Tailacc + Inlining(2)** (RTL) | Rewrites tail recursion to loops; second inlining round | [`integr`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/integr.c) -54%, [`fib`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/fib.c) -46% |
-| **CSE + Deadcode** (RTL, refined) | Disjoint alias analysis; byte-load merging (`Mint64u`) | [`siphash24`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/siphash24.c) -21%, [`sha3`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/sha3.c) -18% |
-| **Loadop + x86 Asm** (Linear/Asm) | Fuses loads into memory operands; zero-extending shifts | [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) -9%, [`nsievebits`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nsievebits.c) -6% |
-| **Pure libm Builtins** (C/common) | Rewrites `sqrt`/`fabs`; treats 50 math calls as pure for CSE | [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c) -17%, [`perlin`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/perlin.c) -15% |
+| **[IVwiden](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/IVwiden.v)** (RTL, new) | Widens 32-bit IVs to 64 bits; folds affine array offsets | [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) -26%, [`sha1`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/sha1.c) -13% |
+| **[LICM](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/LICM.v) + [Looprot](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/Looprot.v)** (RTL, new) | Hoists invariant chains (row strides and base addresses) | [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) -28%, [`syrk`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/syrk/syrk.c) -27% |
+| **[Loadfwd](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/Loadfwd.v)** (RTL, new) | Forwards loads across join points and loop back-edges | [`spectral`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/spectral.c) -40%, [`3mm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/kernels/3mm/3mm.c) -47% |
+| **[Tailacc](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/Tailacc.v) + [Inlining(2)](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/Inlining.v)** (RTL) | Rewrites tail recursion to loops; second inlining round | [`integr`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/integr.c) -54%, [`fib`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/fib.c) -46% |
+| **[CSE](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/CSE.v) + [Deadcode](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/Deadcode.v)** (RTL, refined) | Disjoint alias analysis; byte-load merging (`Mint64u`) | [`siphash24`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/siphash24.c) -21%, [`sha3`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/sha3.c) -18% |
+| **[Loadop](https://github.com/UT-InfraAI/CompCert/blob/v3.18/backend/Loadop.v) + [x86 Asm](https://github.com/UT-InfraAI/CompCert/blob/v3.18/x86/Asm.v)** (Linear/Asm) | Fuses loads into memory operands; zero-extending shifts | [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) -9%, [`nsievebits`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nsievebits.c) -6% |
+| **[Pure libm Builtins](https://github.com/UT-InfraAI/CompCert/blob/v3.18/common/Builtins0.v)** (C/common) | Rewrites `sqrt`/`fabs`; treats 50 math calls as pure for CSE | [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c) -17%, [`perlin`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/perlin.c) -15% |
 
 ---
 
@@ -414,14 +414,14 @@ While we were able to resolve both cases by refining local heuristics, this patt
 
 After addressing these interactions, the initial version of our modified compiler, `faster-compcert` (v0), was able to beat `gcc -O1` and achieve `0.871x` the baseline CompCert runtime on the CompCert benchmarks. This closed 60% of the gap to `gcc -O2` (restricted) (`0.794x`).
 
-To test whether these speedups generalized beyond the CompCert benchmarks, we evaluated the compiler on two held-out suites: `big` (five larger programs: `raytracer`, `spass`, `arcode`, `lzw`, and `lzss`) and `polybench` (all 30 loop-nest kernels from PolyBench/C 4.2.1). The results were modest and both lagged behind `gcc -O1`.
+To test whether these speedups generalized beyond the CompCert benchmarks, we evaluated the compiler on two initially held-out suites: `big` (five larger programs: `raytracer`, `spass`, `arcode`, `lzw`, and `lzss`) and `polybench` (all 30 loop-nest kernels from PolyBench/C 4.2.1). The results were modest and both lagged behind `gcc -O1`.
 
-- On `big`, the compiler reached `0.982x` of baseline (vs `0.834x` for `gcc -O1`).
+- On `big`, the compiler reached `0.982x` of baseline (vs `0.949x` for `gcc -O1`).
 - On `polybench`, the compiler reached `0.845x` of baseline (vs `0.739x` for `gcc -O1`).
 
-Inspecting the assembly of [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) (`C[i][j] += alpha * A[i][k] * B[k][j]`) showed immediately why PolyBench was still slow. Our compiler executed 21 instructions in the inner loop, while `gcc -O1` executed 8:
+Inspecting the assembly of [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) (`C[i][j] += alpha * A[i][k] * B[k][j]`) showed immediately why PolyBench was still slow. Our compiler executed 22 instructions in the inner loop, while `gcc -O1` executed 8:
 
-**Before (`faster-compcert` v0: 21 instructions in inner loop):**
+**Before (`faster-compcert` v0: 22 instructions in inner loop):**
 ```asm
 .L114:  movq    %rsi, %r8
         imulq   $8800, %r8              # C[i] row base recomputed every j!
@@ -506,7 +506,7 @@ Had this claim gone into the trusted base as an assumption rather than a lemma t
 
 Here is where `faster-compcert` stands on a quiet machine, expressed as geometric mean runtime relative to CompCert (lower is faster):
 
-| Compiler configuration | CompCert benchmarks (24 progs, tuned) | `big` (5 progs, held out) | `PolyBench` (30 kernels, held out) |
+| Compiler configuration | CompCert benchmarks (24 progs, tuned) | `big` (5 progs, held out) | `PolyBench` (30 kernels, used in development) |
 |---|---:|---:|---:|
 | CompCert (baseline) | 1.000 | 1.000 | 1.000 |
 | `gcc -O1` | 0.893 | 0.950 | 0.756 |
@@ -519,17 +519,17 @@ Here is where `faster-compcert` stands on a quiet machine, expressed as geometri
 *(Note: "defaults" includes all verified middle-end passes plus `-fshift-mask`, `-fzext-load`, and `-fmerge-bytes`. "All opt-in flags" adds `-fload-op` and `-ftrust-libm`.)*
 
 If we view the same data relative to full `gcc -O2` (`1.00x` = `gcc -O2`), the picture is clear:
-1. On the CompCert benchmarks, CompCert started **28% behind** `gcc -O2`. It is now within **4% to 6%** (closing 81% to 89% of the gap to `gcc -O2` (restricted)).
-2. On `PolyBench` loop nests, CompCert started **55% behind** `gcc -O2`. It is now within **13% to 14%** (closing 70% to 72% of the gap) and beats `gcc -O1`.
-3. On the held-out `big` programs (`spass`, `raytracer`, `arcode`, `lzw`, `lzss`), CompCert started **13% behind** `gcc -O2` and is now **9% behind** (closing 28% to 33% of the gap).
+1. On the CompCert benchmarks, CompCert started **28% behind** `gcc -O2`. It is now within **4.0% to 6.1%** (closing 81% to 89% of the gap to `gcc -O2` (restricted)).
+2. On `PolyBench` loop nests, CompCert started **55% behind** `gcc -O2`. It is now within **13.5% to 14.2%** (closing 70% to 72% of the gap) and beats `gcc -O1`.
+3. On the held-out `big` programs (`spass`, `raytracer`, `arcode`, `lzw`, `lzss`), CompCert started **13% behind** `gcc -O2` and is now **8.5% to 9.1% behind** (closing 28% to 33% of the gap).
 
 <div class="fig-box">
   <div class="fig-title">Figure 2: Full Per-Benchmark Explorer (All 59 Programs)</div>
-  <div class="fig-subtitle">Values &lt; 1.00x mean faster than CompCert. Select a suite tab to inspect raw execution times and speedups.</div>
+  <div class="fig-subtitle">All faster-compcert values use all opt-in flags, including -ftrust-libm. Values &lt; 1.00x mean faster than CompCert. Select a suite tab to inspect raw execution times and runtime reductions.</div>
   
   <div class="tab-nav" id="fig3-tabs">
     <button onclick="setFig3Suite('testc')" data-suite="testc" class="tab-btn active">CompCert benchmarks (24 progs, tuned)</button>
-    <button onclick="setFig3Suite('polybench')" data-suite="polybench" class="tab-btn">PolyBench (30 kernels, held out)</button>
+    <button onclick="setFig3Suite('polybench')" data-suite="polybench" class="tab-btn">PolyBench (30 kernels, used in development)</button>
     <button onclick="setFig3Suite('big')" data-suite="big" class="tab-btn">big (5 progs, held out)</button>
   </div>
 
@@ -539,15 +539,16 @@ If we view the same data relative to full `gcc -O2` (`1.00x` = `gcc -O2`), the p
         <tr>
           <th>Benchmark</th>
           <th>CompCert</th>
-          <th>faster-compcert</th>
+          <th>faster-compcert (all opt-in flags)</th>
           <th>gcc -O2</th>
-          <th>Speedup vs CompCert</th>
-          <th>Status vs gcc -O2</th>
+          <th>Runtime reduction vs CompCert</th>
+          <th>Runtime vs gcc -O2</th>
         </tr>
       </thead>
       <tbody id="fig3-tbody"></tbody>
     </table>
   </div>
+  <div class="fig-caption">Positive percentages mean less runtime than CompCert; negative values indicate regressions. Ratios to gcc -O2 describe measured minima, not statistical significance.</div>
 </div>
 
 ---
@@ -586,7 +587,7 @@ We started with two questions: why is CompCert slower than `gcc -O2`, and can LL
 
 First, CompCert's formal models are not the primary reason for it being slow. Almost all of the gap between CompCert and `gcc -O2` comes from missing optimization passes and suboptimal instruction selection.
 
-Second, LLM agents can write and prove serious compiler optimizations at scale with minimal human supervision. Writing nearly 15,000 lines of Rocq proofs across `Loadfwd`, `LICM`, `IVwiden`, `Tailacc`, and `Loadop` was fast and reliable. Classical performance engineering (catching negative pass interactions, preventing quadratic compile-time blow-ups, checking for overfitting with held-out suites, and fixing shared-machine timing noise) involved more human input than proof engineering.
+Second, LLM agents can write and prove serious compiler optimizations at scale with minimal human supervision. Writing nearly 15,000 lines of Rocq code, including implementations and proofs was fast and reliable. Classical performance engineering (catching negative pass interactions, preventing quadratic compile-time blow-ups, checking for overfitting with held-out suites, and fixing shared-machine timing noise) involved more human input than proof engineering.
 
 Finally, formal verification works only when the model of the real system is accurate. Agents automate traditionally difficult parts of the job like pass-building and proof generation, but human guardrails are still needed for defining the scope of the system and verifying that the model is accurate. Methods like differential testing can help bridge this gap in the future to further reduce the human effort required.
 
@@ -738,10 +739,10 @@ function setFig3Suite(suiteKey) {
   
   tbody.innerHTML = list.map(item => {
     const fcRatio = item.fc / item.cc;
-    const speedupPct = Math.round((1 - fcRatio) * 100);
-    const badgeText = speedupPct > 0 ? `-${speedupPct}%` : `+${Math.abs(speedupPct)}%`;
-    const speedBadge = speedupPct >= 10 ? 'badge-green' : 'badge-gray';
-    const beatsGcc = item.fc <= item.gcc * 1.005;
+    const reductionPct = (1 - fcRatio) * 100;
+    const badgeText = Math.abs(reductionPct) < 0.05 ? '0.0%' : `${reductionPct.toFixed(1)}%`;
+    const speedBadge = reductionPct >= 10 ? 'badge-green' : 'badge-gray';
+    const gccRatio = item.fc / item.gcc;
 
     return `
       <tr>
@@ -750,7 +751,7 @@ function setFig3Suite(suiteKey) {
         <td><strong>${formatTime(item.fc)}</strong> (${fcRatio.toFixed(2)}x)</td>
         <td>${formatTime(item.gcc)}</td>
         <td><span class="badge ${speedBadge}">${badgeText}</span></td>
-        <td>${beatsGcc ? '<span class="badge badge-blue">matches/beats gcc -O2</span>' : '<span style="color: #6a737d;">trails</span>'}</td>
+        <td>${gccRatio.toFixed(3)}x</td>
       </tr>
     `;
   }).join('');
@@ -815,3 +816,5 @@ highlightAsm();
 [^emi]: Vu Le, Mehrdad Afshari, and Zhendong Su. [Compiler Validation via Equivalence Modulo Inputs](https://doi.org/10.1145/2594291.2594334). PLDI 2014.
 [^sun]: Chengnian Sun, Vu Le, Qirun Zhang, and Zhendong Su. [Toward Understanding Compiler Bugs in GCC and LLVM](https://doi.org/10.1145/2931037.2931074). ISSTA 2016.
 [^bench]: CompCert benchmarks: the programs in CompCert 3.18's `test/c` directory ([CompCert-small-tests](https://github.com/AbsInt/CompCert-small-tests)). PolyBench: the 30 loop-nest kernels of [PolyBench/C 4.2.1](https://sourceforge.net/projects/polybench/). All measurements in this post were taken on an Intel Xeon 4314; the benchmarking harness is in [`faster-compcert/`](https://github.com/UT-InfraAI/CompCert/tree/v3.18/faster-compcert) in our fork.
+
+[^scope]: The theorem covers the verified pipeline from CompCert C abstract syntax to assembly abstract syntax. Front-end elaboration, assembly printing, assembling, and linking remain trusted. See the [CompCert manual](https://compcert.org/man/manual001.html).
