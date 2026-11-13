@@ -42,7 +42,9 @@ entry when its edited version is published here to avoid a duplicate.
 - `_layouts/`: shared page and article layouts.
 - `_includes/post-card.html`: an article in the landing-page list.
 - `assets/css/site.css`: responsive styles and article typography.
-- `assets/images/`: covers and the text-based favicon. Do not add images that
-  contain the UTexas logo.
+- `assets/images/`: site-wide images only (e.g. the favicon).
+- `assets/posts/<post-slug>/`: everything one post uses (cover, figures, data),
+  e.g. `assets/posts/compcert-gcc-o2/cover.png`.
+- Do not add images that contain the UTexas logo.
 
 Review changes on localhost before pushing. Push only after Rohit's explicit OK.

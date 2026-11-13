@@ -85,6 +85,7 @@ h1, h2, h3, p { margin-top: 0; }
 .post-header { max-width: 800px; margin: 0 auto; padding: 45px 0 34px; }
 .back-link { display: inline-block; margin-bottom: 44px; color: var(--muted); font-size: 13px; text-decoration: none; }
 .post-header h1 { margin-bottom: 22px; font: 400 clamp(36px, 4.8vw, 56px)/1.12 var(--serif); letter-spacing: -.035em; text-wrap: pretty; }
+.post-header h1 code, .post-card h3 code { font-family: var(--mono); font-size: .8em; letter-spacing: -.03em; white-space: nowrap; }
 .post-description { margin-bottom: 24px; color: var(--muted); font-size: 20px; line-height: 1.6; }
 .post-header .post-meta { font-size: 14px; }
 .post-cover { max-width: 880px; margin: 0 auto 44px; }

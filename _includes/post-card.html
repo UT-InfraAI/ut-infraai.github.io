@@ -9,7 +9,7 @@
   {% endif %}
   <div class="post-card-copy">
     {% if post.tags.size > 0 %}<p class="eyebrow">{{ post.tags | join: ' / ' | escape }}</p>{% endif %}
-    <h3><a href="{{ destination }}">{{ post.title | escape }}</a></h3>
+    <h3><a href="{{ destination }}">{{ post.title_markdown | default: post.title | escape | markdownify | remove: '<p>' | remove: '</p>' | strip }}</a></h3>
     <p class="post-card-description">{{ post.description | escape }}</p>
     <div class="post-meta">
       {% if post.author %}<span>{{ post.author | escape }}</span>{% endif %}

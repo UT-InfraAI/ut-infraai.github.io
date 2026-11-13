@@ -7,7 +7,7 @@ layout: default
     {% if page.tags.size > 0 %}
     <p class="eyebrow">{{ page.tags | join: ' / ' | escape }}</p>
     {% endif %}
-    <h1>{{ page.title | escape }}</h1>
+    <h1>{{ page.title_markdown | default: page.title | escape | markdownify | remove: '<p>' | remove: '</p>' | strip }}</h1>
     {% if page.description %}<p class="post-description">{{ page.description | escape }}</p>{% endif %}
     <div class="post-meta">
       {% if page.author %}<span>{{ page.author | escape }}</span>{% endif %}
