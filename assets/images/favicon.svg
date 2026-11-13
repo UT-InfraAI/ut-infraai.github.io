@@ -1,4 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="12" fill="#202d39"/>
-  <path d="M19 17h26v6H35v18h10v6H19v-6h10V23H19z" fill="#fcfbf8"/>
+  <rect width="64" height="64" rx="12" fill="#fcfbf8"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="800" text-anchor="middle">
+    <text x="32" y="29" font-size="22" letter-spacing="-1" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#202d39">Infra</text>
+    <text x="32" y="56" font-size="28" letter-spacing="-1" fill="#974c32">AI</text>
+  </g>
 </svg>
