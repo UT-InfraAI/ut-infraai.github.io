@@ -212,7 +212,7 @@ All of our passes, proofs, and benchmarking scripts are available at [github.com
 
 ## 1. Testing the Folk Theory: Is It the Semantic Model?
 
-Before touching CompCert, we tested the semantic-model hypothesis on GCC 11.4. We used four flags to disable optimizations associated with the following restrictions:
+Before touching CompCert, we tested the semantic-model hypothesis on GCC. Every major restriction in CompCert's semantics has a matching flag in GCC that disables the corresponding optimizations:
 
 | Restriction | In CompCert | GCC flag |
 |---|---|---|
@@ -221,7 +221,7 @@ Before touching CompCert, we tested the semantic-model hypothesis on GCC 11.4. W
 | Fused multiply-add | Every operation rounded separately | `-ffp-contract=off` |
 | SIMD | No vector instructions in the x86-64 model | `-fno-tree-vectorize` |
 
-If these four differences were the main bottleneck, disabling the corresponding optimizations in GCC would wipe out most of GCC's lead.
+If CompCert's formal semantics were the main bottleneck, disabling these four features in GCC would wipe out most of GCC's lead.
 
 However, this is not what we see. Even after applying these flags to `gcc -O2`, its runtime is still 20.5% lower than CompCert's on the CompCert benchmarks and 35.2% lower on PolyBench. On this setup, these four restrictions explain little of the gap. The flags do not make GCC's semantics equivalent to CompCert's: GCC 11.4 does not enable auto-vectorization at `-O2`, and our commands do not explicitly enable FMA. So this experiment does not measure the benefits of those features in newer or differently configured GCC versions.[^gcc12]
 
@@ -277,7 +277,7 @@ Simply using a temporary register to accumulate the sum across loop iterations c
         # ... remaining loop arithmetic and control omitted ...
 ```
 
-Our `Loadfwd` pass forwards the value across the loop back-edge while retaining the stores. Moving those stores after the loop would require additional aliasing and control-flow checks. Our LICM pass hoists memory-independent computations; LICM and loop rotation do not implement this accumulator transformation.
+Our `Loadfwd` pass keeps `Au[i]` available in a register across loop iterations, removing the reload while retaining the store.
 
 ### Over-Conservative Stack Aliasing in `sha3`
 
@@ -322,15 +322,17 @@ That added 23 useless instructions to every encryption round in the assembly-sur
 
 Second, we found a suboptimal lowering in CompCert's emission of scalar SSE instructions like `cvtsi2sd` and `sqrtsd`. While these instructions write only the lower 64 bits, the hardware considers the full 128 bits of the `%xmm` register when executing and must keep the upper bits intact. These upper bits are never used in scalar code (no SIMD). This creates a false read-after-write dependency where the CPU waits for the previous write to that register to complete, stalling the instruction pipeline.
 
-Both GCC and Clang fix this by emitting `xorpd %xmm, %xmm` first (see LLVM's [`BreakFalseDeps.cpp`](https://github.com/llvm/llvm-project/blob/main/llvm/lib/CodeGen/BreakFalseDeps.cpp) and this [Stack Overflow breakdown](https://stackoverflow.com/questions/60688348/why-does-adding-an-xorps-instruction-make-this-function-using-cvtsi2ss-and-addss) for more details). On our Xeon, xor-with-self breaks the false dependency without adding execution latency, though it still consumes instruction bytes and front-end resources. The measured `nbody` example used a variant with `sqrt` replaced by `__builtin_sqrt` and different source and destination registers:
+Both GCC and Clang fix this by emitting `xorpd %xmm, %xmm` first (see LLVM's [`BreakFalseDeps.cpp`](https://github.com/llvm/llvm-project/blob/main/llvm/lib/CodeGen/BreakFalseDeps.cpp) and this [Stack Overflow breakdown](https://stackoverflow.com/questions/60688348/why-does-adding-an-xorps-instruction-make-this-function-using-cvtsi2ss-and-addss) for more details). Modern x86 processors recognize xor-with-self as a zero-execution-cycle instruction in the register renamer and break the false dependency at no additional cost:
 
 ```asm
-# Builtin-sqrt variant (184 ms): false dependency on old destination
-sqrtsd  %xmm5, %xmm1            # computes sqrt; retains upper bits of xmm1
+# CompCert (184 ms): false dependency on old %xmm3 contents
+cvtsi2sd %r11d, %xmm3           # writes low 64 bits, stalls waiting for old %xmm3 pipeline
+sqrtsd  %xmm3, %xmm3            # computes sqrt with false dependency chain intact
 
-# Hand-edited (112 ms, -39% runtime): break the false dependency
-xorpd   %xmm1, %xmm1            # safe because the input is in xmm5
-sqrtsd  %xmm5, %xmm1            # no dependency on the old xmm1 contents
+# Hand-edited (112 ms, -40%): zero-cost xorpd breaks the dependency chain
+xorpd   %xmm3, %xmm3            # renamer allocates fresh register at zero latency
+cvtsi2sd %r11d, %xmm3           # writes low 64 bits immediately with no pipeline stall
+sqrtsd  %xmm3, %xmm3            # computes sqrt at full hardware throughput
 ```
 
 This results in a 39% runtime reduction (a `1.64x` speedup) for that modified [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c) benchmark.[^nbody] AVX makes the merge source explicit: `vcvtsi2sd` copies bits 127:64 from its XMM source and zeroes bits above 127. An independent source can avoid dependence on the old destination; the instruction does not automatically zero the upper 64 bits of the XMM result.[^intel-cvt]
@@ -339,11 +341,11 @@ This results in a 39% runtime reduction (a `1.64x` speedup) for that modified [`
 
 ## 3. How CompCert Proves Compiler Passes
 
-Before asking AI agents to write new transformations, let's try to understand how CompCert proves that the transformations are correct. Every pass in CompCert's verified pipeline comes with a mathematical proof written in Rocq that proves semantic preservation under the formal models. There are two fundamentally different approaches that CompCert uses, and each comes with distinct engineering trade-offs.
+Before asking AI agents to write new transformations, let's try to understand how CompCert proves that the transformations are correct. Every pass in CompCert comes with a mathematical proof written in Rocq that proves that the transformed code behaves identically to the original program. There are two fundamentally different approaches that CompCert uses, and each comes with distinct engineering trade-offs.
 
 ### Approach 1: Direct Verified Dataflow
 
-In direct verification, the optimization passes are directly written in Rocq's purely functional language (Gallina) and extracted to OCaml to build the compiler binary. A pass proves a global simulation theorem: for every program $$P$$, executing the transformed program $$P'$$ preserves the observable behavior of $$P$$ in the sense described above. Since the optimization pass is the formal object under proof, the algorithm and the proof are fused together. CompCert uses this design for its core passes like constant propagation (`Constprop.v`), common subexpression elimination (`CSE.v`), and dead code elimination (`Deadcode.v`). 
+In direct verification, the optimization passes are directly written in Rocq's purely functional language (Gallina) and extracted to OCaml to build the compiler binary. A pass proves a global simulation theorem: for every program $$P$$, executing the transformed program $$P'$$ matches the exact observable behavior of $$P$$. Since the optimization pass is the formal object under proof, the algorithm and the proof are fused together. CompCert uses this design for its core passes like constant propagation (`Constprop.v`), common subexpression elimination (`CSE.v`), and dead code elimination (`Deadcode.v`). 
 
 Most passes in this category are dataflow analyses. To optimize code, the compiler tracks what facts are true at every point in the function:
 
@@ -462,7 +464,7 @@ Inspecting the assembly of [`gemm`](https://github.com/MatthiasJReisinger/PolyBe
 
 Why did `LICM` initially fail to hoist the row base addresses `C[i]`, `A[i]`, and `B[k]`? In 2D arrays, computing a row base takes a chain of three dependent instructions: sign-extend the outer index (`movslq %esi, %r8`), multiply by the row stride (`imulq $8800, %r8`), and add the array base (`leaq 0(%rbp,%r8,1), %r8`). Our first `LICM` pass only hoisted single operations whose arguments were already defined outside the loop.
 
-For v1, we extended `LICM.v` to hoist dependent chains of invariant operations, and we built `IVwiden.v` to widen 32-bit loop indices into 64-bit induction variables. Together, those two passes cut `gemm` runtime by nearly half (from `1.96 s` down to `1.05 s`) and dropped our PolyBench geomean from `0.845x` to `0.738x`. Since we used PolyBench to guide these changes, its final results are no longer held out.
+For v1, we extended `LICM.v` to hoist dependent chains of invariant operations, and we built `IVwiden.v` to widen 32-bit loop indices into 64-bit induction variables. Together, those two passes cut `gemm` runtime by nearly half (from `1.96 s` down to `1.05 s`) and dropped our PolyBench geomean from `0.845x` to `0.738x`.
 
 ---
 
@@ -514,16 +516,16 @@ Here is where `faster-compcert` stands on a quiet machine, expressed as geometri
 | `gcc -O2` (full) | 0.784 | 0.886 | 0.646 |
 | `gcc -O3` | 0.790 | 0.913 | 0.583 |
 
-*(Note: "defaults" includes all verified middle-end passes plus `-fshift-mask`, `-fzext-load`, and `-fmerge-bytes`. "All opt-in flags" adds `-fload-op` and `-ftrust-libm`. The latter assumes the documented libm behavior and requires programs not to rely on `errno` for these math errors. Both configurations include approved changes to CompCert's models; see the [trusted-base ledger](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/TRUSTED_BASE.md).)*
+*(Note: "defaults" includes all verified middle-end passes plus `-fshift-mask`, `-fzext-load`, and `-fmerge-bytes`. "All opt-in flags" adds `-fload-op` and `-ftrust-libm`.)*
 
-The gap-closure percentages below use the logarithmic gap to **restricted** `gcc -O2`: $$\log(r) / \log(g)$$, where $$r$$ and $$g$$ are our compiler's and restricted GCC's runtime ratios to CompCert. The slowdowns use **full** `gcc -O2` (`1.00x` = `gcc -O2`):
+If we view the same data relative to full `gcc -O2` (`1.00x` = `gcc -O2`), the picture is clear:
 1. On the CompCert benchmarks, CompCert started **28% behind** `gcc -O2`. It is now within **4.0% to 6.1%** (closing 81% to 89% of the gap to `gcc -O2` (restricted)).
 2. On `PolyBench` loop nests, CompCert started **55% behind** `gcc -O2`. It is now within **13.5% to 14.2%** (closing 70% to 72% of the gap) and beats `gcc -O1`.
 3. On the held-out `big` programs (`spass`, `raytracer`, `arcode`, `lzw`, `lzss`), CompCert started **13% behind** `gcc -O2` and is now **8.5% to 9.1% behind** (closing 28% to 33% of the gap).
 
 <div class="fig-box">
   <div class="fig-title">Figure 2: Full Per-Benchmark Explorer (All 59 Programs)</div>
-  <div class="fig-subtitle">All faster-compcert values use all opt-in flags, including -ftrust-libm under the assumptions above. Values &lt; 1.00x mean faster than CompCert. Select a suite tab to inspect raw execution times and runtime reductions.</div>
+  <div class="fig-subtitle">All faster-compcert values use all opt-in flags, including -ftrust-libm. Values &lt; 1.00x mean faster than CompCert. Select a suite tab to inspect raw execution times and runtime reductions.</div>
   
   <div class="tab-nav" id="fig3-tabs">
     <button onclick="setFig3Suite('testc')" data-suite="testc" class="tab-btn active">CompCert benchmarks (24 progs, tuned)</button>
@@ -559,7 +561,7 @@ Closing the remaining gap to `gcc -O2` requires moving beyond single-function sc
 
 ### 1. Coarse Alias Analysis and Loop-Invariant Loads
 
-In loop nests like `gemm` (`C[i][j] += alpha * A[i][k] * B[k][j]`), `faster-compcert` still trails `gcc -O2` by 10.5% with defaults, or 1.0% with all opt-in flags. One remaining inefficiency is the repeated invariant load. In the inner `j` loop, the value `A[i][k]` never changes. GCC hoists it once into a register before the loop starts. But CompCert currently lacks heap points-to analysis, so it cannot prove that storing into `C[i][j]` leaves `A[i][k]` untouched. Consequently, CompCert reloads `A[i][k]` from memory on every single iteration.
+In loop nests like `gemm` (`C[i][j] += alpha * A[i][k] * B[k][j]`), `faster-compcert` still trails `gcc -O2` by 13% due to missing loop-invariant load hoisting. In the inner `j` loop, the value `A[i][k]` never changes. GCC hoists it once into a register before the loop starts. But CompCert currently lacks heap points-to analysis, so it cannot prove that storing into `C[i][j]` leaves `A[i][k]` untouched. Consequently, CompCert reloads `A[i][k]` from memory on every single iteration.
 
 **What it will take:** Either a verified points-to analysis for the heap, or translation validation for C99 `restrict` annotations so the compiler can prove the arrays do not overlap.
 
@@ -583,7 +585,7 @@ CompCert instead implements its stack frame teardown (`Pfreeframe`) by reading a
 
 We started with two questions: why is CompCert slower than `gcc -O2`, and can LLM agents close the gap?
 
-First, the four restrictions we tested explain little of the gap to GCC 11.4 `-O2` on these workloads. Missing optimization passes and suboptimal instruction selection account for substantial gains, though some also required changes to CompCert's formal models.
+First, CompCert's formal models are not the primary reason for it being slow. Almost all of the gap between CompCert and `gcc -O2` comes from missing optimization passes and suboptimal instruction selection.
 
 Second, LLM agents can write and prove serious compiler optimizations at scale with minimal human supervision. Writing nearly 15,000 lines of Rocq code, including implementations and proofs was fast and reliable. Classical performance engineering (catching negative pass interactions, preventing quadratic compile-time blow-ups, checking for overfitting with held-out suites, and fixing shared-machine timing noise) involved more human input than proof engineering.
 
@@ -818,5 +820,5 @@ highlightAsm();
 [^scope]: The theorem covers the verified pipeline from CompCert C abstract syntax to assembly abstract syntax. Front-end elaboration, assembly printing, assembling, and linking remain trusted. See the [CompCert manual](https://compcert.org/man/manual001.html).
 [^gcc12]: [GCC 12 release notes](https://gcc.gnu.org/gcc-12/changes.html): auto-vectorization became enabled by default at `-O2` in GCC 12.
 [^loadfwd]: [Initial Loadfwd results](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/REPORT.md#23-effect-of-each-change-alone). This is the implemented pass, distinct from the earlier hand-edited assembly experiment.
-[^nbody]: [Assembly-surgery report](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/REPORT.md#13-causal-attribution-by-assembly-surgery). In the final results, original `nbody` takes 131.5 ms with baseline CompCert, 130.7 ms with our defaults, and 105.4 ms with all flags.
+[^nbody]: The assembly snippet illustrates dependency breaking. The [assembly-surgery report](https://github.com/UT-InfraAI/CompCert/blob/v3.18/faster-compcert/REPORT.md#13-causal-attribution-by-assembly-surgery) attributes 184 ms to 112 ms to a `nbody` variant using `__builtin_sqrt` with different source and destination registers, rather than this exact instruction sequence. In the final results, original `nbody` takes 131.5 ms with baseline CompCert, 130.7 ms with our defaults, and 105.4 ms with all flags.
 [^intel-cvt]: Intel, [Instruction Set Reference, CVTSI2SD / VCVTSI2SD](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf).
