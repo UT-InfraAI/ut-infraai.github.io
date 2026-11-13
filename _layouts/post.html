@@ -21,9 +21,6 @@ layout: default
   </figure>
   {% endif %}
   <div class="prose">
-    {% if page.original_url %}
-    <aside class="original-note">Originally published{% if page.original_date %} on {{ page.original_date | date: '%B %-d, %Y' }}{% endif %} on <a href="{{ page.original_url | escape }}">{{ page.original_site | default: "the author's blog" | escape }}</a>.</aside>
-    {% endif %}
     {{ content }}
   </div>
   <div class="post-end"><a href="{{ '/' | relative_url }}"><span aria-hidden="true">←</span> Back to all posts</a></div>

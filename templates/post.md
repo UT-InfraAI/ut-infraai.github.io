@@ -10,10 +10,8 @@ tags: [Systems]
 # Put this post's files in /assets/posts/<post-slug>/.
 # image: /assets/posts/post-slug/cover.png
 # image_alt: "Describe the image for readers who cannot see it."
-# Optional attribution for a reprint:
-# original_url: https://example.com/original-post
-# original_site: "the author's blog"
-# original_date: YYYY-MM-DD
+# Set to load MathJax; write math as $$...$$ (inline or display):
+# math: true
 ---
 
 Introduce the question and why it matters.

@@ -111,7 +111,6 @@ figcaption { margin-top: 12px; color: var(--muted); font: 13px/1.5 var(--sans); 
 .prose table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; margin: 28px 0; font: 14px/1.6 var(--sans); }
 .prose th, .prose td { padding: 12px 16px; border-bottom: 1px solid var(--rule); text-align: left; }
 .prose th { border-top: 1px solid var(--ink); color: var(--ink); font-weight: 650; }
-.prose .original-note { margin: 0 0 32px; padding: 16px 20px; background: #f0eee8; font: 14px/1.7 var(--sans); color: var(--muted); }
 .post-end { max-width: 730px; margin: 50px auto 0; padding-top: 24px; border-top: 1px solid var(--rule); font-size: 14px; }
 .post-end a { text-decoration: none; }
 .footnotes { margin-top: 40px; font-size: 15px; color: var(--muted); }
