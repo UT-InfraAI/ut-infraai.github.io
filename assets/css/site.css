@@ -113,6 +113,8 @@ figcaption { margin-top: 12px; color: var(--muted); font: 13px/1.5 var(--sans); 
 .prose th { border-top: 1px solid var(--ink); color: var(--ink); font-weight: 650; }
 .post-end { max-width: 730px; margin: 50px auto 0; padding-top: 24px; border-top: 1px solid var(--rule); font-size: 14px; }
 .post-end a { text-decoration: none; }
+/* Display math scrolls on its own instead of widening the page. */
+.prose mjx-container[display="true"] { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 .footnotes { margin-top: 40px; font-size: 15px; color: var(--muted); }
 .footnotes::before { content: "References"; display: block; margin-bottom: 12px; color: var(--ink); font-size: 13px; font-weight: 650; letter-spacing: .13em; text-transform: uppercase; }
 .prose sup[role="doc-noteref"] { font-size: .7em; line-height: 0; }
