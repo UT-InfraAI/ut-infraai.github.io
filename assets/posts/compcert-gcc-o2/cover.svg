@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title description">
+  <title id="title">Compiler optimizations, with proofs</title>
+  <desc id="description">A C program passes through CompCert to become x86-64 assembly, with optimizations supported by machine-checked proofs.</desc>
+  <defs>
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M60 0H0V60" fill="none" stroke="#202d39" stroke-opacity=".05" stroke-width="2"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M2 2l8 4-8 4" fill="none" stroke="#202d39" stroke-width="1.5"/>
+    </marker>
+  </defs>
+  <rect width="1920" height="1080" fill="#eeeae1"/>
+  <rect width="1920" height="1080" fill="url(#grid)"/>
+  <g fill="#202d39" font-family="Arial, Helvetica, sans-serif">
+    <text x="120" y="141" font-size="27" letter-spacing="5">COMPCERT / GCC -O2</text>
+    <text x="120" y="285" font-family="Georgia, serif" font-size="99" letter-spacing="-3">Optimizations, with proofs.</text>
+  </g>
+  <g stroke="#202d39" stroke-width="3">
+    <rect x="120" y="422" width="330" height="240" rx="3" fill="#fcfbf8"/>
+    <rect x="650" y="392" width="620" height="300" rx="3" fill="#202d39"/>
+    <rect x="1470" y="422" width="330" height="240" rx="3" fill="#fcfbf8"/>
+    <path d="M465 542H619M1286 542h154" fill="none" marker-end="url(#arrow)"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" text-anchor="middle">
+    <text x="285" y="548" fill="#202d39" font-family="Consolas, monospace" font-size="70">C</text>
+    <text x="285" y="605" fill="#5f666b" font-size="27">source program</text>
+    <text x="960" y="531" fill="#fcfbf8" font-size="79" letter-spacing="-3">CompCert</text>
+    <text x="960" y="603" fill="#d4d8d5" font-size="29">formally verified compiler</text>
+    <text x="1635" y="540" fill="#202d39" font-family="Consolas, monospace" font-size="48">x86-64</text>
+    <text x="1635" y="605" fill="#5f666b" font-size="27">assembly</text>
+  </g>
+  <path d="M960 693v72" fill="none" stroke="#974c32" stroke-width="3"/>
+  <rect x="704" y="766" width="512" height="79" rx="3" fill="#fcfbf8" stroke="#974c32" stroke-width="2"/>
+  <path d="M739 805l12 12 24-27" fill="none" stroke="#974c32" stroke-width="4"/>
+  <text x="800" y="817" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#974c32">Machine-checked proofs</text>
+  <path d="M120 939h1680" stroke="#202d39" stroke-opacity=".2" stroke-width="2"/>
+  <text x="120" y="1003" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="bold" fill="#202d39">InfraAI</text>
+  <text x="1800" y="1003" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="26" fill="#5f666b">RESEARCH NOTES</text>
+</svg>
