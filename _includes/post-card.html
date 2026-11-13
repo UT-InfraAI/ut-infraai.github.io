@@ -1,0 +1,20 @@
+{% assign post = include.post %}
+{% assign destination = post.external_url | default: post.url %}
+{% unless post.external_url %}{% assign destination = destination | relative_url %}{% endunless %}
+<article class="post-card{% unless post.image %} post-card--text{% endunless %}">
+  {% if post.image %}
+  <a class="post-card-image" href="{{ destination }}" tabindex="-1" aria-hidden="true">
+    <img src="{{ post.image | relative_url }}" alt="" width="1920" height="1080"{% unless include.featured %} loading="lazy"{% endunless %}>
+  </a>
+  {% endif %}
+  <div class="post-card-copy">
+    {% if post.tags.size > 0 %}<p class="eyebrow">{{ post.tags | join: ' / ' | escape }}</p>{% endif %}
+    <h3><a href="{{ destination }}">{{ post.title | escape }}</a></h3>
+    <p class="post-card-description">{{ post.description | escape }}</p>
+    <div class="post-meta">
+      {% if post.author %}<span>{{ post.author | escape }}</span>{% endif %}
+      <time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: '%B %-d, %Y' }}</time>
+    </div>
+    <a class="read-link" href="{{ destination }}">{% if post.external_url %}Read on {{ post.external_site | default: "the author's blog" | escape }} <span aria-hidden="true">↗</span>{% else %}Read the post <span aria-hidden="true">→</span>{% endif %}</a>
+  </div>
+</article>

@@ -1,0 +1,30 @@
+---
+layout: default
+---
+<article class="post">
+  <header class="post-header">
+    <a class="back-link" href="{{ '/' | relative_url }}"><span aria-hidden="true">←</span> All posts</a>
+    {% if page.tags.size > 0 %}
+    <p class="eyebrow">{{ page.tags | join: ' / ' | escape }}</p>
+    {% endif %}
+    <h1>{{ page.title | escape }}</h1>
+    {% if page.description %}<p class="post-description">{{ page.description | escape }}</p>{% endif %}
+    <div class="post-meta">
+      {% if page.author %}<span>{{ page.author | escape }}</span>{% endif %}
+      <time datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: '%B %-d, %Y' }}</time>
+    </div>
+  </header>
+  {% if page.image %}
+  <figure class="post-cover">
+    <img src="{{ page.image | relative_url }}" alt="{{ page.image_alt | default: '' | escape }}" width="1920" height="1080">
+    {% if page.image_caption %}<figcaption>{{ page.image_caption | escape }}</figcaption>{% endif %}
+  </figure>
+  {% endif %}
+  <div class="prose">
+    {% if page.original_url %}
+    <aside class="original-note">Originally published{% if page.original_date %} on {{ page.original_date | date: '%B %-d, %Y' }}{% endif %} on <a href="{{ page.original_url | escape }}">{{ page.original_site | default: "the author's blog" | escape }}</a>.</aside>
+    {% endif %}
+    {{ content }}
+  </div>
+  <div class="post-end"><a href="{{ '/' | relative_url }}"><span aria-hidden="true">←</span> Back to all posts</a></div>
+</article>
