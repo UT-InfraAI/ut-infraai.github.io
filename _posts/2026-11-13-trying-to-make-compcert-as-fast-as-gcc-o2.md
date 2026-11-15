@@ -335,7 +335,7 @@ cvtsi2sd %r11d, %xmm3           # writes low 64 bits immediately with no pipelin
 sqrtsd  %xmm3, %xmm3            # computes sqrt at full hardware throughput
 ```
 
-This results in a 40% speedup for [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c) when `sqrt` is compiled to CompCert's `__builtin_sqrt`. (With the false dependency, that version was even slower than stock CompCert's 132 ms libm call.) AVX doesn't make this go away either: the three-operand `vcvtsi2sd` copies its upper bits from a second source register, so compilers still zero that register first.
+This results in a 40% speedup for [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c) when `sqrt` is compiled to CompCert's `__builtin_sqrt`. (With the false dependency, that version was even slower than stock CompCert's 132 ms libm call.)
 
 ---
 
