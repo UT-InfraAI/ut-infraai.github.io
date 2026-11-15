@@ -223,7 +223,7 @@ Before touching CompCert, we tested the semantic-model hypothesis on GCC. Every 
 
 If CompCert's formal semantics were the main bottleneck, disabling these four features in GCC would wipe out most of GCC's lead.
 
-However, this is not what we see. Even after restricting these flags in `gcc -O2`, it is still 22% faster than CompCert on the CompCert benchmarks and 55% faster on the PolyBench suite. This means that the semantic models are not the main bottleneck. Most of the gap comes from optimizations that CompCert's rules already allow, but that CompCert never performs.
+However, this is not what we see. Even after restricting these flags in `gcc -O2`, CompCert is still 26% slower on the CompCert benchmarks and 54% slower on the PolyBench suite. This means that the semantic models are not the main bottleneck. Most of the gap comes from optimizations that CompCert's rules already allow, but that CompCert never performs.
 
 
 <div class="fig-box">
@@ -318,7 +318,7 @@ movl    %edx, %edx              # redundant! 32-bit shift already zeroes upper 3
 movl    0(%r9,%rdx,4), %r10d    # load 32-bit word from lookup table Te0
 ```
 
-That added 23 useless instructions to every encryption round in the assembly-surgery report. Just removing these instructions cut `aes` runtime from 85.2 ms down to 77.6 ms (a 9% runtime reduction). Along with LICM, we were able to reach ~67 ms (about a 20% runtime reduction from the ~84 ms baseline). This was slightly faster than `gcc -O2`.
+That added 23 useless instructions to every encryption round. Just removing these instructions cut `aes` runtime from 85.2 ms down to 77.6 ms (a 9% runtime reduction). Along with LICM, we were able to reach ~67 ms (about a 20% runtime reduction from the ~84 ms baseline). This was slightly faster than `gcc -O2`.
 
 Second, we found a suboptimal lowering in CompCert's emission of scalar SSE instructions like `cvtsi2sd` and `sqrtsd`. While these instructions write only the lower 64 bits, the hardware considers the full 128 bits of the `%xmm` register when executing and must keep the upper bits intact. These upper bits are never used in scalar code (no SIMD). This creates a false read-after-write dependency where the CPU waits for the previous write to that register to complete, stalling the instruction pipeline.
 
@@ -335,7 +335,7 @@ cvtsi2sd %r11d, %xmm3           # writes low 64 bits immediately with no pipelin
 sqrtsd  %xmm3, %xmm3            # computes sqrt at full hardware throughput
 ```
 
-This results in a 40% speedup for [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c). Intel has since fixed this architectural quirk in AVX: three-operand instructions like `vcvtsi2sd` zero the upper 64 bits and eliminate the false dependency by default.
+This results in a 40% speedup for [`nbody`](https://github.com/AbsInt/CompCert-small-tests/blob/main/c/nbody.c) when `sqrt` is compiled to CompCert's `__builtin_sqrt`. (With the false dependency, that version was even slower than stock CompCert's 132 ms libm call.) AVX doesn't make this go away either: the three-operand `vcvtsi2sd` copies its upper bits from a second source register, so compilers still zero that register first.
 
 ---
 
@@ -366,7 +366,7 @@ Instead of proving that an optimization algorithm produces the correct output fo
 2. A **verified validator** (written and proved in Rocq, and then extracted to OCaml) that checks whether the transformation is correct for that specific function.
 
 CompCert already uses this design for passes with complex graph algorithms:
-* **Register Allocation (`Allocation.v`):** An untrusted OCaml solver runs iterated register coalescing graph coloring, and a compact Rocq validator checks that no interfering variables share a physical register.
+* **Register Allocation (`Allocation.v`):** An untrusted OCaml solver runs iterated register coalescing graph coloring, and a compact Rocq validator checks that every variable's value is still in the register or stack slot where the allocated code reads it.
 * **Basic Block Layout (`Linearize.v`):** An untrusted OCaml heuristic orders blocks to minimize jumps, and a verified Rocq validator checks that all control flow paths remain intact.
 
 This architecture does not weaken the mathematical guarantee. The pass retains its verification guarantee under the same trusted assumptions. You prove a single theorem for the validator once when building the compiler:
@@ -408,7 +408,7 @@ Every single pass we implemented made benchmarks faster in isolation. However, m
 * In `sha3`, `Loadfwd` inserted shadow copies after memory operations. While `Deadcode` normally eliminated them, `CSE` used those shadow registers as canonical replacements, merging 27 distinct values and increasing register pressure until `keccakf` spilled to the stack.
 * In `nsieve`, rotating a loop copied the exit test to the bottom, turning an unconditional jump into a conditional branch. That disqualified the block from CompCert's latch-placement heuristic in `Linearizeaux.ml`, adding extra jumps on the hot path.
 
-While we were able to resolve both cases by refining local heuristics, this pattern points to a broader reality: no single fixed pass order or heuristic is optimal across all codebases. Pass interactions like these make a strong case for **profile-driven autotuning** and/or **agentic optimization**. This is especially true for *verified compilers* since each optimization pass is guaranteed to be correct (or no-op) - so we only need to worry about the interactions! This is very different from traditional compilers where the wrong order of passes might not only be suboptimal but could also introduce bugs.
+While we were able to resolve both cases by refining local heuristics, this pattern points to a broader reality: no single fixed pass order or heuristic is optimal across all codebases. Pass interactions like these make a strong case for **profile-driven autotuning** and/or **agentic optimization**. This is especially true for *verified compilers* since each optimization pass is guaranteed to be correct (or no-op) — so we only need to worry about the interactions! This is very different from traditional compilers where the wrong order of passes might not only be suboptimal but could also introduce bugs.
 
 ### 5.2 Evaluating Beyond the CompCert Benchmarks: PolyBench and Larger Programs
 
@@ -417,7 +417,7 @@ After addressing these interactions, the initial version of our modified compile
 To test whether these speedups generalized beyond the CompCert benchmarks, we evaluated the compiler on two initially held-out suites: `big` (five larger programs: `raytracer`, `spass`, `arcode`, `lzw`, and `lzss`) and `polybench` (all 30 loop-nest kernels from PolyBench/C 4.2.1). The results were modest and both lagged behind `gcc -O1`.
 
 - On `big`, the compiler reached `0.982x` of baseline (vs `0.949x` for `gcc -O1`).
-- On `polybench`, the compiler reached `0.845x` of baseline (vs `0.739x` for `gcc -O1`).
+- On `polybench`, the compiler reached `0.845x` of baseline (vs `0.739x` for `gcc -O1`).[^drift]
 
 Inspecting the assembly of [`gemm`](https://github.com/MatthiasJReisinger/PolyBenchC-4.2.1/blob/master/linear-algebra/blas/gemm/gemm.c) (`C[i][j] += alpha * A[i][k] * B[k][j]`) showed immediately why PolyBench was still slow. Our compiler executed 22 instructions in the inner loop, while `gcc -O1` executed 8:
 
@@ -519,7 +519,7 @@ Here is where `faster-compcert` stands on a quiet machine, expressed as geometri
 *(Note: "defaults" includes all verified middle-end passes plus `-fshift-mask`, `-fzext-load`, and `-fmerge-bytes`. "All opt-in flags" adds `-fload-op` and `-ftrust-libm`.)*
 
 If we view the same data relative to full `gcc -O2` (`1.00x` = `gcc -O2`), the picture is clear:
-1. On the CompCert benchmarks, CompCert started **28% behind** `gcc -O2`. It is now within **4.0% to 6.1%** (closing 81% to 89% of the gap to `gcc -O2` (restricted)).
+1. On the CompCert benchmarks, CompCert started **28% behind** `gcc -O2`. It is now within **4.0% to 6.1%** (closing 81% to 89% of the gap to `gcc -O2` (restricted)).[^gap]
 2. On `PolyBench` loop nests, CompCert started **55% behind** `gcc -O2`. It is now within **13.5% to 14.2%** (closing 70% to 72% of the gap) and beats `gcc -O1`.
 3. On the held-out `big` programs (`spass`, `raytracer`, `arcode`, `lzw`, `lzss`), CompCert started **13% behind** `gcc -O2` and is now **8.5% to 9.1% behind** (closing 28% to 33% of the gap).
 
@@ -555,13 +555,13 @@ If we view the same data relative to full `gcc -O2` (`1.00x` = `gcc -O2`), the p
 
 ## 8. What Still Blocks Us from Matching GCC -O2
 
-While we have made significant progress in closing the performance gap in this pilot, there is still a long way to go. The gap between the CompCert benchmarks and the held-out `big` programs reflects where we focused our optimization effort (and token spend). We focused on low hanging fruit like loop-level optimizations inside individual functions. That strategy works well for small numerical kernels. But in larger programs like `spass` and `raytracer`, runtime was driven by function call overhead, pointer indirection, and memory layout. These are things we haven't even begun to address. 
+While we have made significant progress in closing the performance gap in this pilot, there is still a long way to go. The gap between the CompCert benchmarks and the held-out `big` programs reflects where we focused our optimization effort (and token spend). We focused on low-hanging fruit like loop-level optimizations inside individual functions. That strategy works well for small numerical kernels. But in larger programs like `spass` and `raytracer`, runtime was driven by function call overhead, pointer indirection, and memory layout. These are things we haven't even begun to address. 
 
 Closing the remaining gap to `gcc -O2` requires moving beyond single-function scalar passes. The following are some examples of optimizations that we identified but did not implement.
 
 ### 1. Coarse Alias Analysis and Loop-Invariant Loads
 
-In loop nests like `gemm` (`C[i][j] += alpha * A[i][k] * B[k][j]`), `faster-compcert` still trails `gcc -O2` by 13% due to missing loop-invariant load hoisting. In the inner `j` loop, the value `A[i][k]` never changes. GCC hoists it once into a register before the loop starts. But CompCert currently lacks heap points-to analysis, so it cannot prove that storing into `C[i][j]` leaves `A[i][k]` untouched. Consequently, CompCert reloads `A[i][k]` from memory on every single iteration.
+On PolyBench loop nests, `faster-compcert` still trails `gcc -O2` by 13%, partly due to missing loop-invariant load hoisting. Take `gemm` (`C[i][j] += alpha * A[i][k] * B[k][j]`): in the inner `j` loop, the value `A[i][k]` never changes. GCC hoists it once into a register before the loop starts. But CompCert currently lacks heap points-to analysis, so it cannot prove that storing into `C[i][j]` leaves `A[i][k]` untouched. Consequently, CompCert reloads `A[i][k]` from memory on every single iteration.
 
 **What it will take:** Either a verified points-to analysis for the heap, or translation validation for C99 `restrict` annotations so the compiler can prove the arrays do not overlap.
 
@@ -573,11 +573,11 @@ In call-heavy code like `spass` and `arcode`, functions call other functions con
 
 ### 3. Stack Frame Back-Links
 
-On x86-64, an optimized function return simply adds a constant offset to the stack pointer (`addq $sz, %rsp; ret`).
+On x86-64, an optimized function prologue simply subtracts a constant offset from the stack pointer (`subq $sz, %rsp`).
 
-CompCert instead implements its stack frame teardown (`Pfreeframe`) by reading a stored back-link from memory. Small, non-inlined functions that could otherwise run entirely in CPU registers are forced to round-trip stack pointers through memory on every return.
+CompCert's formal model instead tears down each stack frame (`Pfreeframe`) by reading a stored back-link from memory, so every prologue (`Pallocframe`) must also write that back-link (an extra `leaq` and `movq`). Small, non-inlined functions that could otherwise run entirely in CPU registers are forced to store a stack pointer to memory on every call.
 
-**What it will take:** Either more aggressive inlining to remove the frame altogether, or refactoring `Mach` and `Asm` frame emission to replace the memory read with a constant `addq` offset.
+**What it will take:** Either more aggressive inlining to remove the frame altogether, or refactoring `Mach` and `Asm` frame semantics so `Pfreeframe` no longer reads the back-link and the store can be dropped.
 
 ---
 
@@ -587,7 +587,7 @@ We started with two questions: why is CompCert slower than `gcc -O2`, and can LL
 
 First, CompCert's formal models are not the primary reason for it being slow. Almost all of the gap between CompCert and `gcc -O2` comes from missing optimization passes and suboptimal instruction selection.
 
-Second, LLM agents can write and prove serious compiler optimizations at scale with minimal human supervision. Writing nearly 15,000 lines of Rocq code, including implementations and proofs was fast and reliable. Classical performance engineering (catching negative pass interactions, preventing quadratic compile-time blow-ups, checking for overfitting with held-out suites, and fixing shared-machine timing noise) involved more human input than proof engineering.
+Second, LLM agents can write and prove serious compiler optimizations at scale with minimal human supervision. Writing nearly 15,000 lines of Rocq code, including implementations and proofs, was fast and reliable. Classical performance engineering (catching negative pass interactions, preventing quadratic compile-time blow-ups, checking for overfitting with held-out suites, and fixing shared-machine timing noise) involved more human input than proof engineering.
 
 Finally, formal verification works only when the model of the real system is accurate. Agents automate traditionally difficult parts of the job like pass-building and proof generation, but human guardrails are still needed for defining the scope of the system and verifying that the model is accurate. Methods like differential testing can help bridge this gap in the future to further reduce the human effort required.
 
@@ -815,6 +815,8 @@ highlightAsm();
 [^csmith]: Xuejun Yang, Yang Chen, Eric Eide, and John Regehr. [Finding and Understanding Bugs in C Compilers](https://doi.org/10.1145/1993498.1993532). PLDI 2011.
 [^emi]: Vu Le, Mehrdad Afshari, and Zhendong Su. [Compiler Validation via Equivalence Modulo Inputs](https://doi.org/10.1145/2594291.2594334). PLDI 2014.
 [^sun]: Chengnian Sun, Vu Le, Qirun Zhang, and Zhendong Su. [Toward Understanding Compiler Bugs in GCC and LLVM](https://doi.org/10.1145/2931037.2931074). ISSTA 2016.
-[^bench]: CompCert benchmarks: the programs in CompCert 3.18's `test/c` directory ([CompCert-small-tests](https://github.com/AbsInt/CompCert-small-tests)). PolyBench: the 30 loop-nest kernels of [PolyBench/C 4.2.1](https://sourceforge.net/projects/polybench/). All measurements in this post were taken on an Intel Xeon 4314; the benchmarking harness is in [`faster-compcert/`](https://github.com/UT-InfraAI/CompCert/tree/v3.18/faster-compcert) in our fork.
+[^bench]: CompCert benchmarks: the programs in CompCert 3.18's `test/c` directory ([CompCert-small-tests](https://github.com/AbsInt/CompCert-small-tests)). PolyBench: the 30 loop-nest kernels of [PolyBench/C 4.2.1](https://sourceforge.net/projects/polybench/). All measurements in this post were taken on an Intel Xeon Silver 4314; the benchmarking harness is in [`faster-compcert/`](https://github.com/UT-InfraAI/CompCert/tree/v3.18/faster-compcert) in our fork.
 
 [^scope]: The theorem covers the verified pipeline from CompCert C abstract syntax to assembly abstract syntax. Front-end elaboration, assembly printing, assembling, and linking remain trusted. See the [CompCert manual](https://compcert.org/man/manual001.html).
+[^drift]: The v0 numbers in this section come from an earlier measurement session. In the final runs in Section 7, `gcc -O1` measured `0.950x` on `big` and `0.756x` on PolyBench because of run-to-run machine drift.
+[^gap]: "Gap closed" is measured on a log scale against `gcc -O2` (restricted): `ln(faster-compcert) / ln(gcc -O2 restricted)`, using the geomeans in the table above.
