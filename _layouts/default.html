@@ -27,7 +27,7 @@
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header shell">
-      <a class="wordmark" href="{{ '/' | relative_url }}" aria-label="InfraAI blog home">Infra<span>AI</span></a>
+      <a class="wordmark" href="{{ '/' | relative_url }}"><img src="{{ '/assets/images/infraai-ldos-logo.png' | relative_url }}" width="400" height="75" alt="InfraAI and LDOS blog home"></a>
       <nav aria-label="Main navigation">
         <a href="{{ '/' | relative_url }}"{% if page.url == '/' %} aria-current="page"{% endif %}>
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
@@ -57,8 +57,14 @@
       {{ content }}
     </main>
     <footer class="site-footer shell">
-      <span>InfraAI Center</span>
-      {% if site.posts.size > 0 %}<a href="{{ '/feed.xml' | relative_url }}">RSS feed <span aria-hidden="true">↗</span></a>{% endif %}
+      <div class="footer-row">
+        {% assign current_year = site.time | date: '%Y' | plus: 0 %}
+        <span>&copy; 2026{% if current_year > 2026 %}&ndash;{{ site.time | date: '%y' }}{% endif %} InfraAI &amp; LDOS</span>
+        {% if site.posts.size > 0 %}<a href="{{ '/feed.xml' | relative_url }}">RSS feed <span aria-hidden="true">↗</span></a>{% endif %}
+      </div>
+      <div class="footer-ack">
+        <p>We thank the InfraAI Center's <a href="https://infraai.center/industry">industry partners</a> for their generous support. This material is based upon work supported by the U.S. National Science Foundation (NSF) under <a href="https://www.nsf.gov/funding/opportunities/expeditions-expeditions-computing">Grant Number 2326576</a>. Any opinions, findings and conclusions or recommendations expressed in this material do not necessarily reflect the views of the U.S. National Science Foundation.</p>
+      </div>
     </footer>
   </body>
 </html>
